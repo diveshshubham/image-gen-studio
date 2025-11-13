@@ -1,0 +1,36 @@
+{
+    "name": "image-gen-frontend",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "test": "vitest --coverage",
+        "lint": "eslint src --ext ts,tsx --fix"
+    },
+    "dependencies": {
+        "@vitejs/plugin-react": "^5.1.1",
+        "axios": "^1.6.0",
+        "framer-motion": "^10.18.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+    },
+    "devDependencies": {
+        "@testing-library/jest-dom": "^6.1.4",
+        "@testing-library/react": "^14.1.2",
+        "@testing-library/user-event": "^14.5.1",
+        "@types/react": "^18.2.15",
+        "@types/react-dom": "^18.2.7",
+        "autoprefixer": "^10.4.14",
+        "eslint": "^8.47.0",
+        "eslint-config-prettier": "^9.0.0",
+        "eslint-plugin-react": "^7.33.1",
+        "postcss": "^8.4.27",
+        "tailwindcss": "^3.4.1",
+        "typescript": "^5.3.3",
+        "vite": "^5.0.0",
+        "vitest": "^0.34.4"
+    }
+}

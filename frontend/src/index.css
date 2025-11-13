@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth background transition for dark mode */
+:root {
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --muted: #6b7280;
+}
+.dark {
+  --bg: #0b1220;
+  --card: #071025;
+  --muted: #9ca3af;
+}
+
+body {
+  background: linear-gradient(180deg, var(--bg), rgba(99,102,241,0.02));
+  transition: background 300ms ease, color 300ms ease;
+}
+
+/* Card */
+.card {
+  background: var(--card);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+/* Nice focus outlines for accessibility */
+:focus {
+  outline: 3px solid rgba(99,102,241,0.25);
+  outline-offset: 2px;
+}
