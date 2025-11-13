@@ -74,19 +74,28 @@ describe('saveUploadedFile', () => {
   });
 
   it('uses sharp to resize and saves file, deletes tmp, returns urlPath', async () => {
-    // simulate uploads dir doesn't exist so mkdir is called
-    existsSpy.mockReturnValue(false);
-
+    // make existsSync return false for uploads dir, true for tmp file
+    const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+    existsSpy.mockImplementation((p: fs.PathLike) => {
+      const s = typeof p === 'string' ? p : p.toString();
+      if (s === uploadsDir) return false; // simulate uploads dir missing
+      return true; // tmp file exists
+    });
+  
     const tmp = '/tmp/fake.png';
     // ensure unlink does not throw
     unlinkSpy.mockImplementation(() => {});
-
+  
     const res = await saveUploadedFile(tmp, 'photo.png');
-
-    // sharp should have been called and toFile resolved
-    expect((sharp as unknown as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(1);
+  
+    // assert that the chainable API was exercised
+    expect(resizeMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(toFileMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+  
     expect(res).not.toBeNull();
     expect(res!.urlPath).toMatch(/^\/uploads\/\d+-[0-9a-f]+\.png$/);
+  
+    // unlink should have been attempted for tmp file
     expect(unlinkSpy).toHaveBeenCalledWith(tmp);
   });
 

@@ -12,6 +12,7 @@ const router = Router();
 
 // temporary uploads directory (multer will write files here) later can be moved to cloud storage
 const tmpDir = path.join(__dirname, '..', '..', 'uploads', 'tmp');
+console.log(`Temporary uploads directory: ${tmpDir}`);
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
 const storage = multer.diskStorage({

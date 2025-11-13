@@ -1,7 +1,7 @@
 // backend/src/services/generationService.ts
-import path from 'path';
 import fs from 'fs';
-import db from '../models/db';
+import path from 'path';
+import { initDb, run, get, all } from '../models/db';
 import { saveUploadedFile } from './imageService';
 import logger from '../utils/logger';
 
@@ -26,8 +26,7 @@ export interface GenerationResult {
 }
 
 /**
- * Creates a generation record. Simulates delay and random overload error (20%).
- * Handles saving uploaded file if provided.
+ * Create a generation, save file if provided, insert DB row and return the row.
  */
 export async function createGenerationService(
   userId: number,
@@ -35,6 +34,7 @@ export async function createGenerationService(
   style: string,
   file?: Express.Multer.File
 ): Promise<GenerationResult> {
+  await initDb();
   logger.debug(`Starting generation for user ${userId} with style "${style}"`);
 
   try {
@@ -53,25 +53,47 @@ export async function createGenerationService(
 
     if (file) {
       logger.debug(`Handling uploaded file: ${file.originalname}`);
-      const tmpPath = (file as any).path || undefined;
-      const originalName = file.originalname;
 
       try {
-        if (tmpPath) {
-          const saved = await saveUploadedFile(tmpPath, originalName);
-          imageUrl = saved?.urlPath ?? null;
-          logger.info(`File saved successfully: ${imageUrl}`);
-        } else if ((file as any).buffer) {
-          const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
-          if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+        let bufferOrPath: Buffer | string | null = null;
+        const originalName = file.originalname || 'upload.png';
 
-          const tmpFile = path.join(uploadsDir, `tmp-${Date.now()}.bin`);
-          fs.writeFileSync(tmpFile, (file as any).buffer);
-
-          const saved = await saveUploadedFile(tmpFile, originalName);
-          imageUrl = saved?.urlPath ?? null;
-          logger.info(`Buffered file saved successfully: ${imageUrl}`);
+        if ((file as any).buffer && Buffer.isBuffer((file as any).buffer)) {
+          bufferOrPath = (file as any).buffer as Buffer;
+          logger.debug(
+            `Got buffer for uploaded file ${originalName} (size=${(bufferOrPath as Buffer).length})`
+          );
+        } else if ((file as any).path && typeof (file as any).path === 'string') {
+          const tmpPath = (file as any).path as string;
+          bufferOrPath = tmpPath;
+          logger.debug(`Using disk temp file for upload: ${tmpPath}`);
+        } else {
+          const m = `Uploaded file missing both buffer and path for ${originalName}`;
+          logger.error(m);
+          throw new Error(m);
         }
+
+        // Accept either string or object return from saveUploadedFile (tests mock a string)
+        const saved: any = await saveUploadedFile(bufferOrPath, originalName);
+        if (!saved && saved !== '') {
+          const m = `saveUploadedFile returned null/undefined for ${originalName}`;
+          logger.error(m);
+          throw new Error(m);
+        }
+
+        // Normalize possible return shapes:
+        // - string -> treat as url/path
+        // - { urlPath } or { path } -> extract
+        // - other -> coerce to string
+        if (typeof saved === 'string') {
+          imageUrl = saved;
+        } else if (typeof saved === 'object' && saved !== null) {
+          imageUrl = (saved.urlPath ?? saved.path ?? saved.url ?? null) as string | null;
+        } else {
+          imageUrl = String(saved) || null;
+        }
+
+        logger.info(`File saved successfully: ${imageUrl}`);
       } catch (fileErr: any) {
         logger.error(`Error saving uploaded file for user ${userId}: ${fileErr.stack || fileErr}`);
         throw fileErr;
@@ -79,13 +101,32 @@ export async function createGenerationService(
     }
 
     const createdAt = new Date().toISOString();
-    const stmt = db.prepare(
-      'INSERT INTO generations (userId, prompt, style, imageUrl, status, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-    );
-    const info = stmt.run(userId, prompt, style, imageUrl, 'done', createdAt);
 
-    const generation = {
-      id: Number(info.lastInsertRowid),
+    // Insert generation record (status 'done' here for synchronous demo)
+    run(
+      'INSERT INTO generations (userId, prompt, style, imageUrl, status, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, prompt, style, imageUrl, 'done', createdAt]
+    );
+
+    // Try to get last insert id. If missing, fallback to selecting the most recent row
+    let last = get<{ id: number }>('SELECT last_insert_rowid() as id');
+    let genId = Number(last?.id ?? 0);
+    if (!genId || genId === 0 || Number.isNaN(genId)) {
+      // fallback: fetch most recent generation for this user by createdAt
+      const fallback = get<{ id: number }>(
+        'SELECT id FROM generations WHERE userId = ? ORDER BY id DESC LIMIT 1',
+        [userId]
+      );
+      genId = Number(fallback?.id ?? 0);
+    }
+
+    // If still 0, warn — but still return a composed object
+    if (!genId || genId === 0) {
+      logger.warn(`Could not determine inserted generation id for user=${userId}`);
+    }
+
+    const generation: GenerationResult = {
+      id: genId,
       prompt,
       style,
       imageUrl,
@@ -93,7 +134,7 @@ export async function createGenerationService(
       createdAt,
     };
 
-    logger.info(`Generation ${generation.id} completed successfully for user ${userId}`);
+    logger.info(`Generation created (id=${generation.id}) for user=${userId}`);
     return generation;
   } catch (err: any) {
     if (err instanceof ModelOverloadError) {
@@ -106,21 +147,20 @@ export async function createGenerationService(
 }
 
 /**
- * Returns last `limit` generations for a user (ordered desc).
+ * List last `limit` generations for a user (async).
  */
-export function listGenerationsService(userId: number, limit = 5) {
+export async function listGenerationsService(userId: number, limit = 5): Promise<GenerationResult[]> {
+  await initDb();
   const l = Math.max(1, Math.min(100, limit));
   logger.debug(`Fetching last ${l} generations for user ${userId}`);
 
   try {
-    const rows = db
-      .prepare(
-        'SELECT id, prompt, style, imageUrl, status, createdAt FROM generations WHERE userId = ? ORDER BY id DESC LIMIT ?'
-      )
-      .all(userId, l);
-
+    // Inline numeric limit to avoid drivers that don't allow binding LIMIT
+    const sql = `SELECT id, prompt, style, imageUrl, status, createdAt
+                 FROM generations WHERE userId = ? ORDER BY id DESC LIMIT ${l}`;
+    const rows = all<GenerationResult>(sql, [userId]);
     logger.info(`Fetched ${rows.length} generations for user ${userId}`);
-    return rows as GenerationResult[];
+    return rows;
   } catch (err: any) {
     logger.error(`Error listing generations for user ${userId}: ${err.stack || err}`);
     throw err;

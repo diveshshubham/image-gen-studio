@@ -59,8 +59,8 @@ export async function listGenerations(req: AuthRequest, res: Response) {
   logger.debug(`listGenerations called by user=${userId} limit=${limit}`);
 
   try {
-    const rows = listGenerationsService(userId, limit);
-    logger.info(`listGenerations returned ${rows.length} rows for user=${userId}`);
+    const rows = await listGenerationsService(userId, limit);
+    logger.info(`listGenerations returned ${(await rows).length} rows for user=${userId}`);
     return res.json(rows);
   } catch (err: any) {
     logger.error(`listGenerations error for user=${userId}: ${err.stack || err}`);
