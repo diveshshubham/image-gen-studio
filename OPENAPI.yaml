@@ -1,0 +1,83 @@
+---
+
+## OPENAPI.yaml
+
+openapi: 3.0.3
+info:
+  title: Image Gen Studio API
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000
+paths:
+  /auth/signup:
+    post:
+      summary: Signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '201': { description: Created }
+        '400': { description: Validation error }
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+  /generations:
+    post:
+      summary: Create generation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                prompt: { type: string }
+                style: { type: string }
+                image: { type: string, format: binary }
+      responses:
+        '201':
+          description: Generation created
+        '503':
+          description: Model overloaded
+    get:
+      summary: Get last generations
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Array of generations
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
