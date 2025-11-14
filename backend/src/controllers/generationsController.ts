@@ -1,20 +1,17 @@
-// backend/src/controllers/generationsController.ts
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth';
 import logger from '../utils/logger';
-import {
-  createGenerationService,
-  listGenerationsService,
-  ModelOverloadError,
-} from '../services/generationService';
+import { listGenerationsService } from '../services/generationService';
+import { createGenerationWithIdempotency } from '../services/idempotencyService';
 
 export async function createGeneration(req: AuthRequest, res: Response) {
   const userId = req.userId!;
   const { prompt, style } = req.body as { prompt: string; style: string };
+  const file = (req as any).file as Express.Multer.File | undefined;
 
-  logger.debug(`createGeneration called by user=${userId}`);
+  logger.debug(`createGeneration controller called by user=${userId}`);
 
-  // input validation
+  // input validation (prompt/style still validated in controller to fail fast)
   if (!prompt || !style) {
     logger.warn(`createGeneration missing input for user=${userId}`, {
       missingPrompt: !prompt,
@@ -23,30 +20,21 @@ export async function createGeneration(req: AuthRequest, res: Response) {
     return res.status(400).json({ message: 'Missing prompt or style' });
   }
 
+  const idempotencyKey =
+    (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string);
+
   try {
-    const file = (req as any).file as Express.Multer.File | undefined;
-    if (file) {
-      // log presence/metadata but avoid logging file contents
-      logger.debug(`createGeneration received file for user=${userId}`, {
-        originalName: file.originalname,
-        size: (file as any).size ?? null,
-        hasBuffer: !!(file as any).buffer,
-        hasPath: !!(file as any).path,
-      });
-    } else {
-      logger.debug(`createGeneration no file uploaded for user=${userId}`);
-    }
-
-    const result = await createGenerationService(userId, prompt, style, file);
-    logger.info(`Generation created (id=${result.id}) for user=${userId}`);
-    return res.status(201).json(result);
+    // delegate entire idempotency + generation flow to service
+    const { code, body } = await createGenerationWithIdempotency(
+      userId,
+      prompt,
+      style,
+      file,
+      idempotencyKey
+    );
+    return res.status(code).json(body);
   } catch (err: any) {
-    if (err instanceof ModelOverloadError || err.name === 'ModelOverloadError') {
-      logger.warn(`Model overloaded for user=${userId}: ${err.message}`);
-      return res.status(503).json({ message: 'Model overloaded' });
-    }
-
-    logger.error(`createGeneration error for user=${userId}: ${err.stack || err}`);
+    logger.error(`createGeneration unexpected error for user=${userId}: ${err.stack || err}`);
     return res.status(500).json({ message: 'Server error' });
   }
 }

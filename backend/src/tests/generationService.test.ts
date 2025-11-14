@@ -94,7 +94,6 @@ describe('generationService', () => {
       expect(insertCall).toBeDefined();
 
       const params = insertCall![1];
-      // assert fields individually to avoid brittle full-array equality (createdAt is dynamic)
       expect(params[0]).toBe(7);
       expect(params[1]).toBe('a prompt');
       expect(params[2]).toBe('stylized');
@@ -110,14 +109,12 @@ describe('generationService', () => {
         status: 'done',
       });
 
-      // logger info should have been called mentioning file saved
       expect((logger.info as jest.Mock).mock.calls.some((c: any[]) =>
         String(c[0]).includes('File saved successfully')
       )).toBeTruthy();
     });
 
     it('creates generation successfully when file.buffer provided (no path)', async () => {
-      // Ensure randomOverload() does NOT trigger by forcing Math.random() > 0.2
       const mathSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9);
     
       try {

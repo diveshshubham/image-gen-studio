@@ -1,4 +1,3 @@
-// backend/src/services/generationService.ts
 import fs from 'fs';
 import path from 'path';
 import { initDb, run, get, all } from '../models/db';
@@ -26,16 +25,23 @@ export interface GenerationResult {
 }
 
 /**
- * Create a generation, save file if provided, insert DB row and return the row.
+ * Core generation logic. When options.skipInsert is true, the function will
+ * perform the model/file work and return a "partial" result WITHOUT inserting
+ * into DB. When skipInsert is false (default), it will insert into DB and
+ * return the inserted row (with id if available).
+ *
+ * options:
+ *  - skipInsert?: boolean
  */
 export async function createGenerationService(
   userId: number,
   prompt: string,
   style: string,
-  file?: Express.Multer.File
+  file?: Express.Multer.File,
+  options?: { skipInsert?: boolean }
 ): Promise<GenerationResult> {
   await initDb();
-  logger.debug(`Starting generation for user ${userId} with style "${style}"`);
+  logger.debug(`Starting generation for user ${userId} with style "${style}" (skipInsert=${!!options?.skipInsert})`);
 
   try {
     // simulate model delay
@@ -102,6 +108,20 @@ export async function createGenerationService(
 
     const createdAt = new Date().toISOString();
 
+    // If skipInsert -> return a partial object, controller or idempotency service will persist.
+    if (options?.skipInsert) {
+      const partial: GenerationResult = {
+        id: 0,
+        prompt,
+        style,
+        imageUrl,
+        status: 'done',
+        createdAt,
+      };
+      logger.info(`Generation completed (skipInsert) for user=${userId}`);
+      return partial;
+    }
+
     // Insert generation record (status 'done' here for synchronous demo)
     run(
       'INSERT INTO generations (userId, prompt, style, imageUrl, status, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
@@ -112,7 +132,7 @@ export async function createGenerationService(
     let last = get<{ id: number }>('SELECT last_insert_rowid() as id');
     let genId = Number(last?.id ?? 0);
     if (!genId || genId === 0 || Number.isNaN(genId)) {
-      // fallback: fetch most recent generation for this user by createdAt
+      // fallback: fetch most recent generation for this user by id DESC
       const fallback = get<{ id: number }>(
         'SELECT id FROM generations WHERE userId = ? ORDER BY id DESC LIMIT 1',
         [userId]
@@ -120,7 +140,6 @@ export async function createGenerationService(
       genId = Number(fallback?.id ?? 0);
     }
 
-    // If still 0, warn — but still return a composed object
     if (!genId || genId === 0) {
       logger.warn(`Could not determine inserted generation id for user=${userId}`);
     }
@@ -148,21 +167,27 @@ export async function createGenerationService(
 
 /**
  * List last `limit` generations for a user (async).
+ * NOTE: By default only returns successful generations (status = 'done').
  */
 export async function listGenerationsService(userId: number, limit = 5): Promise<GenerationResult[]> {
   await initDb();
   const l = Math.max(1, Math.min(100, limit));
-  logger.debug(`Fetching last ${l} generations for user ${userId}`);
+  logger.debug(`Fetching last ${l} successful generations for user ${userId}`);
 
   try {
-    // Inline numeric limit to avoid drivers that don't allow binding LIMIT
+    // Only fetch rows with status = 'done'
     const sql = `SELECT id, prompt, style, imageUrl, status, createdAt
-                 FROM generations WHERE userId = ? ORDER BY id DESC LIMIT ${l}`;
+                 FROM generations 
+                 WHERE userId = ? AND status = 'done'
+                 ORDER BY id DESC 
+                 LIMIT ${l}`;
+
     const rows = all<GenerationResult>(sql, [userId]);
-    logger.info(`Fetched ${rows.length} generations for user ${userId}`);
+
+    logger.info(`Fetched ${rows.length} successful generations for user ${userId}`);
     return rows;
   } catch (err: any) {
-    logger.error(`Error listing generations for user ${userId}: ${err.stack || err}`);
+    logger.error(`Error listing successful generations for user ${userId}: ${err.stack || err}`);
     throw err;
   }
 }

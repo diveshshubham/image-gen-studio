@@ -64,6 +64,15 @@ export async function initDb() {
       createdAt TEXT NOT NULL,
       FOREIGN KEY(userId) REFERENCES users(id)
     );
+
+    -- idempotency table: track client-provided idempotency keys
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      key TEXT PRIMARY KEY,
+      userId INTEGER,
+      generationId INTEGER, -- set once generation completes
+      status TEXT NOT NULL, -- 'in-progress' | 'done' | 'failed'
+      createdAt TEXT NOT NULL
+    );
   `);
 
   // persist initial DB to disk (if file-based)
@@ -119,17 +128,12 @@ export function all<T = any>(sql: string, params: any[] = []): T[] {
   const stmt = db.prepare(sql);
   const out: T[] = [];
   try {
-    console.log('[DEBUG] SQL:', sql, 'params:', params);
+    // debug logging can be toggled or removed
+    // console.log('[DEBUG] SQL:', sql, 'params:', params);
 
     if (params && params.length) stmt.bind(params);
 
     while (stmt.step()) {
-      // raw array of values
-      let raw: any;
-      try {
-        raw = (stmt as any).get();
-      } catch (_) {}
-
       const rowObj = stmt.getAsObject() as T;
       out.push(rowObj);
     }
@@ -140,7 +144,6 @@ export function all<T = any>(sql: string, params: any[] = []): T[] {
   }
   return out;
 }
-
 
 /**
  * Return single row or null. Uses prepare()/bind()/step()/getAsObject().
@@ -174,4 +177,46 @@ export function close() {
     db = null;
     inited = false;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Idempotency helpers
+   These are tiny convenience functions you can call from your route handlers.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Read idempotency record by key.
+ * Returns { key, userId, generationId, status, createdAt } or null.
+ */
+export function getIdempotency(key: string) {
+  if (!key) return null;
+  return get<{ key: string; userId: number | null; generationId: number | null; status: string; createdAt: string }>(
+    'SELECT key, userId, generationId, status, createdAt FROM idempotency_keys WHERE key = ?',
+    [key]
+  );
+}
+
+/**
+ * Create an idempotency record (status='in-progress').
+ */
+export function createIdempotency(key: string, userId: number | null = null) {
+  const createdAt = new Date().toISOString();
+  run(
+    'INSERT INTO idempotency_keys (key, userId, generationId, status, createdAt) VALUES (?, ?, ?, ?, ?)',
+    [key, userId, null, 'in-progress', createdAt]
+  );
+}
+
+/**
+ * Mark idempotency record done and attach generationId.
+ */
+export function markIdempotencyDone(key: string, generationId: number) {
+  run('UPDATE idempotency_keys SET generationId = ?, status = ? WHERE key = ?', [generationId, 'done', key]);
+}
+
+/**
+ * Mark idempotency record failed.
+ */
+export function markIdempotencyFailed(key: string) {
+  run('UPDATE idempotency_keys SET status = ? WHERE key = ?', ['failed', key]);
 }

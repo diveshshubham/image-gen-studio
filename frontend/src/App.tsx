@@ -9,6 +9,7 @@ import { useGenerate } from './hooks/useGenerate';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 
+
 const API = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 type GenerationItem = {
@@ -28,7 +29,7 @@ export default function App(): JSX.Element {
     const uploadRef = useRef<UploadHandle | null>(null);
 
     const [history, setHistory] = useState<GenerationItem[]>([]);
-    const { generate, loading, error, abort } = useGenerate(token);
+    const { generate, retry, loading, error, shouldRetry, abort } = useGenerate(token);
     const [dark, setDark] = useState<boolean>(() => localStorage.getItem('dark') === 'true');
 
     // Controls whether to show the studio or the auth screen
@@ -178,11 +179,17 @@ export default function App(): JSX.Element {
 
                             <div className="flex gap-2 mt-4">
                                 <button
-                                    onClick={handleGenerate}
+                                    onClick={() => {
+                                        if (shouldRetry) {
+                                            retry();
+                                        } else {
+                                            handleGenerate();
+                                        }
+                                    }}
                                     disabled={loading}
                                     className="bg-indigo-600 text-white px-4 py-2 rounded disabled:opacity-50"
                                 >
-                                    Generate
+                                    {loading ? 'Generating…' : shouldRetry ? 'Retry' : 'Generate'}
                                 </button>
 
                                 <button onClick={abort} disabled={!loading} className="border px-4 py-2 rounded">
